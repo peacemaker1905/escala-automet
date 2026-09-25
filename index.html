@@ -53,9 +53,9 @@
         ];
 
         const turnos = {
-            "1º TURNO": { inicio: "06:45:00", fim: "18:45:00", pernoite: false, cor: "7" }, // Azul
-            "2º TURNO": { inicio: "18:45:00", fim: "06:45:00", pernoite: true, cor: "9" },  // Roxo
-            "3º TURNO": { inicio: "07:00:00", fim: "19:00:00", pernoite: false, cor: "10" } // Verde
+            "1º TURNO": { inicio: "06:45:00", fim: "18:45:00", pernoite: false, cor: "7" },
+            "2º TURNO": { inicio: "18:45:00", fim: "06:45:00", pernoite: true, cor: "9" }, 
+            "3º TURNO": { inicio: "07:00:00", fim: "19:00:00", pernoite: false, cor: "10" }
         };
 
         let tokenClient;
@@ -78,6 +78,9 @@
                 scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/spreadsheets.readonly',
                 callback: (tokenResponse) => {
                     if (tokenResponse && tokenResponse.access_token) {
+                        // CONSERTO AQUI: Passamos o token recebido para o GAPI
+                        gapi.client.setToken({ access_token: tokenResponse.access_token });
+                        
                         document.getElementById('authBtn').style.display = 'none';
                         buscarAbasDaPlanilha(); 
                     }
@@ -201,7 +204,6 @@
         function criarObjetoEvento(nomeTurno, dataBaseStr, anoEscala, mesEscala, dia, tituloAba) {
             const tInfo = turnos[nomeTurno];
             
-            // Criação da Chave Única e Blindada para o App
             const chaveUnica = `${tituloAba}_${dataBaseStr}_${nomeTurno}`;
 
             let evento = {
@@ -210,7 +212,7 @@
                 'colorId': tInfo.cor,
                 'extendedProperties': {
                     'private': {
-                        'appKey': chaveUnica // O carimbo invisível do evento!
+                        'appKey': chaveUnica 
                     }
                 }
             };
@@ -233,13 +235,11 @@
             };
         }
 
-        // Função melhorada que entende se a célula tem o nome todo (ex: "C 2S BMT CÍNTIA") ou só a letra
         function verificaTurno(linha, indices, codigoDesejado) {
             for (let i = 0; i < indices.length; i++) {
                 let idx = indices[i];
                 if (linha.length > idx && linha[idx]) {
                     let valor = linha[idx].toString().toUpperCase().trim();
-                    // Checa se é exatamente a letra, ou se a letra vem seguida de um espaço ou quebra de linha
                     if (valor === codigoDesejado || 
                         valor.startsWith(codigoDesejado + " ") || 
                         valor.startsWith(codigoDesejado + "\n") || 
@@ -265,21 +265,17 @@
 
                 let mapaExistentes = {};
                 
-                // Filtra todos os eventos gerados pelo App no período
                 const eventosApp = (responseCal.result.items || []).filter(ev => 
                     ev.description && ev.description.includes('Gerado automaticamente via Web App')
                 );
 
                 eventosApp.forEach(ev => {
-                    // 1. Tenta achar pelo Carimbo Invisível (appKey)
                     if (ev.extendedProperties && ev.extendedProperties.private && ev.extendedProperties.private.appKey) {
                         const appKey = ev.extendedProperties.private.appKey;
-                        // Só adiciona no mapa se a chave pertencer a ABA atual
                         if (appKey.startsWith(`${tituloAba}_`)) {
                             mapaExistentes[appKey] = ev;
                         }
                     } 
-                    // 2. Se for um evento velho sem carimbo, identifica pela descrição e força exclusão
                     else if (ev.description.includes(`(${tituloAba})`)) {
                         mapaExistentes[`OLD_${ev.id}`] = ev; 
                     }
@@ -307,22 +303,18 @@
 
                     const dataBaseStr = `${anoEscala}-${mesEscala}-${String(dia).padStart(2, '0')}`;
 
-                    // --- 1º Turno (Colunas C, D, E) [índices 2, 3, 4] -> IGUAL PARA EMS E CMM ---
                     if (verificaTurno(linha, [2, 3, 4], codigoOperador)) {
                         turnosDesejados.push(criarObjetoEvento("1º TURNO", dataBaseStr, anoEscala, mesEscala, dia, tituloAba));
                     }
 
                     if (isCMM) {
-                        // --- 2º Turno CMM (Colunas F, G, H) [índices 5, 6, 7] ---
                         if (verificaTurno(linha, [5, 6, 7], codigoOperador)) {
                             turnosDesejados.push(criarObjetoEvento("2º TURNO", dataBaseStr, anoEscala, mesEscala, dia, tituloAba));
                         }
-                        // --- 3º Turno CMM (Colunas I, J, K) [índices 8, 9, 10] ---
                         if (verificaTurno(linha, [8, 9, 10], codigoOperador)) {
                             turnosDesejados.push(criarObjetoEvento("3º TURNO", dataBaseStr, anoEscala, mesEscala, dia, tituloAba));
                         }
                     } else {
-                        // --- 2º Turno EMS (Colunas F, G) [índices 5, 6] ---
                         if (verificaTurno(linha, [5, 6], codigoOperador)) {
                             turnosDesejados.push(criarObjetoEvento("2º TURNO", dataBaseStr, anoEscala, mesEscala, dia, tituloAba));
                         }
