@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sincronizador de Escala - Turnos</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: auto; }
+        button { padding: 10px 20px; font-size: 16px; margin-top: 10px; cursor: pointer; background-color: #4285F4; color: white; border: none; border-radius: 5px; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        #syncBtn { background-color: #34A853; width: 100%; font-weight: bold; }
+        #status { margin-top: 20px; padding: 10px; border-radius: 5px; background: #f0f0f0; white-space: pre-line; }
+        .input-group { margin: 15px 0; }
+        input[type="text"] { padding: 10px; width: 100%; box-sizing: border-box; font-size: 16px; text-transform: uppercase;}
+        .checkbox-container { background: #eef2f3; padding: 15px; border-radius: 5px; margin: 15px 0; display: none; }
+        .checkbox-item { margin-bottom: 8px; font-size: 16px; }
+    </style>
+</head>
+<body>
+
+    <h2>Sincronizador de Escala</h2>
+    
+    <div class="input-group">
+        <label>Digite seu Código de Operador (Letra exata da escala):</label>
+        <input type="text" id="codigoOperador" placeholder="Ex: C, I, W, M, R, T, L">
+    </div>
+
+    <button id="authBtn" onclick="handleAuthClick()">1. Fazer Login no Google</button>
+    
+    <div id="containerAbas" class="checkbox-container">
+        <label><b>Selecione as abas/meses disponíveis para sincronizar:</b></label>
+        <div id="listaAbas"></div>
+    </div>
+
+    <button id="syncBtn" onclick="sincronizarAbasSelecionadas()" style="display:none;" disabled>2. Sincronizar Escalas Selecionadas</button>
+
+    <div id="status">Aguardando login...</div>
+
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js" async defer onload="gapiLoaded()"></script>
+
+    <script>
+        const CLIENT_ID = '118048571551-37il00plhko6shv5cie9tsi4hbq8cdlk.apps.googleusercontent.com'; 
+        const SPREADSHEET_ID = '1viBph-E4vnDqA2E8XJJXEAoXUSAwbY73Qhymc_VJZrA';
+
+        const mapeamentoMeses = [
+            { num: "01", chaves: ["JAN"] }, { num: "02", chaves: ["FEV"] },
+            { num: "03", chaves: ["MAR"] }, { num: "04", chaves: ["ABR"] },
+            { num: "05", chaves: ["MAI"] }, { num: "06", chaves: ["JUN"] },
+            { num: "07", chaves: ["JUL"] }, { num: "08", chaves: ["AGO"] },
+            { num: "09", chaves: ["SET"] }, { num: "10", chaves: ["OUT"] },
+            { num: "11", chaves: ["NOV"] }, { num: "12", chaves: ["DEZ"] }
+        ];
+
+        const turnos = {
+            "1º TURNO": { inicio: "06:45:00", fim: "18:45:00", pernoite: false, cor: "7" }, // Azul
+            "2º TURNO": { inicio: "18:45:00", fim: "06:45:00", pernoite: true, cor: "9" },  // Roxo
+            "3º TURNO": { inicio: "07:00:00", fim: "19:00:00", pernoite: false, cor: "10" } // Verde
+        };
+
+        let tokenClient;
+
+        function gapiLoaded() { gapi.load('client', initializeGapiClient); }
+
+        async function initializeGapiClient() {
+            await gapi.client.init({
+                discoveryDocs: [
+                    "https://sheets.googleapis.com/$discovery/rest?version=v4",
+                    "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"
+                ]
+            });
+            initTokenClient();
+        }
+
+        function initTokenClient() {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/spreadsheets.readonly',
+                callback: (tokenResponse) => {
+                    if (tokenResponse && tokenResponse.access_token) {
+                        document.getElementById('authBtn').style.display = 'none';
+                        buscarAbasDaPlanilha(); 
+                    }
+                },
+            });
+        }
+
+        function handleAuthClick() { tokenClient.requestAccessToken({prompt: 'consent'}); }
+
+        function atualizarStatus(msg) { document.getElementById('status').innerText = msg; }
+
+        function analisarNomeDaAba(titulo) {
+            const nomeStr = titulo.toUpperCase();
+            let mesEncontrado = null;
+            let anoEncontrado = new Date().getFullYear().toString(); 
+
+            const regexAno = /20\d{2}/;
+            const matchAno = nomeStr.match(regexAno);
+            if (matchAno) anoEncontrado = matchAno[0];
+
+            for (let i = 0; i < mapeamentoMeses.length; i++) {
+                const map = mapeamentoMeses[i];
+                if (map.chaves.some(chave => nomeStr.includes(chave))) {
+                    mesEncontrado = map.num;
+                    break;
+                }
+            }
+
+            if (mesEncontrado) return { tituloOriginal: titulo, mes: mesEncontrado, ano: anoEncontrado };
+            return null; 
+        }
+
+        async function buscarAbasDaPlanilha() {
+            atualizarStatus("Analisando abas da planilha...");
+            try {
+                const response = await gapi.client.sheets.spreadsheets.get({
+                    spreadsheetId: SPREADSHEET_ID
+                });
+                
+                const abas = response.result.sheets;
+                let htmlCheckbox = '';
+                let encontrouValida = false;
+
+                abas.forEach(aba => {
+                    if (aba.properties.hidden) return; 
+
+                    const dadosAba = analisarNomeDaAba(aba.properties.title);
+                    if (dadosAba) {
+                        encontrouValida = true;
+                        htmlCheckbox += `
+                            <div class="checkbox-item">
+                                <label>
+                                    <input type="checkbox" class="aba-selecionada" value="${dadosAba.tituloOriginal}" data-mes="${dadosAba.mes}" data-ano="${dadosAba.ano}" checked>
+                                    ${dadosAba.tituloOriginal} (Mês ${dadosAba.mes}/${dadosAba.ano})
+                                </label>
+                            </div>
+                        `;
+                    }
+                });
+
+                if (encontrouValida) {
+                    document.getElementById('listaAbas').innerHTML = htmlCheckbox;
+                    document.getElementById('containerAbas').style.display = 'block';
+                    document.getElementById('syncBtn').style.display = 'inline-block';
+                    document.getElementById('syncBtn').disabled = false;
+                    atualizarStatus("Planilha lida! Selecione as abas e clique em Sincronizar.");
+                } else {
+                    atualizarStatus("Aviso: Nenhuma aba visível correspondente a meses foi encontrada.");
+                }
+
+            } catch (err) {
+                console.error(err);
+                let msgErro = "Erro desconhecido.";
+                if (err.result && err.result.error && err.result.error.message) {
+                    msgErro = err.result.error.message;
+                } else if (err.message) {
+                    msgErro = err.message;
+                }
+                atualizarStatus("Erro ao conectar com a planilha: " + msgErro);
+            }
+        }
+
+        async function sincronizarAbasSelecionadas() {
+            const codigoDigitado = document.getElementById('codigoOperador').value.toUpperCase().trim();
+            if(!codigoDigitado) {
+                alert("Preencha o Código do Operador antes de sincronizar.");
+                return;
+            }
+
+            const checkboxes = document.querySelectorAll('.aba-selecionada:checked');
+            if (checkboxes.length === 0) {
+                alert("Selecione pelo menos uma escala para sincronizar.");
+                return;
+            }
+
+            document.getElementById('syncBtn').disabled = true;
+            let totalInseridos = 0;
+            let totalRemovidos = 0;
+            let totalMantidos = 0;
+
+            for (let i = 0; i < checkboxes.length; i++) {
+                const box = checkboxes[i];
+                const nomeAba = box.value;
+                const mesAba = box.getAttribute('data-mes');
+                const anoAba = box.getAttribute('data-ano');
+
+                atualizarStatus(`Processando aba: ${nomeAba} (${i+1}/${checkboxes.length})...`);
+                
+                const resultado = await processarUnicaAba(codigoDigitado, nomeAba, mesAba, anoAba);
+                if (resultado) {
+                    totalInseridos += resultado.inseridos;
+                    totalRemovidos += resultado.removidos;
+                    totalMantidos += resultado.mantidos;
+                }
+            }
+
+            atualizarStatus(`Processo Concluído!\n🟢 ${totalInseridos} turnos adicionados\n🔴 ${totalRemovidos} turnos deletados (escala alterada ou atualização de sistema)\n⚪ ${totalMantidos} turnos idênticos mantidos.`);
+            document.getElementById('syncBtn').disabled = false;
+        }
+
+        function criarObjetoEvento(nomeTurno, dataBaseStr, anoEscala, mesEscala, dia, tituloAba) {
+            const tInfo = turnos[nomeTurno];
+            
+            // Criação da Chave Única e Blindada para o App
+            const chaveUnica = `${tituloAba}_${dataBaseStr}_${nomeTurno}`;
+
+            let evento = {
+                'summary': nomeTurno,
+                'description': `Gerado automaticamente via Web App (${tituloAba})`,
+                'colorId': tInfo.cor,
+                'extendedProperties': {
+                    'private': {
+                        'appKey': chaveUnica // O carimbo invisível do evento!
+                    }
+                }
+            };
+
+            evento.start = { 'dateTime': `${dataBaseStr}T${tInfo.inicio}-03:00`, 'timeZone': 'America/Sao_Paulo' };
+            
+            let dataFimStr = dataBaseStr;
+            if (tInfo.pernoite) { 
+                let nextDate = new Date(anoEscala, parseInt(mesEscala)-1, dia + 1);
+                const y = nextDate.getFullYear();
+                const m = String(nextDate.getMonth() + 1).padStart(2, '0');
+                const d = String(nextDate.getDate()).padStart(2, '0');
+                dataFimStr = `${y}-${m}-${d}`;
+            }
+            evento.end = { 'dateTime': `${dataFimStr}T${tInfo.fim}-03:00`, 'timeZone': 'America/Sao_Paulo' };
+
+            return {
+                chave: chaveUnica, 
+                corpo: evento
+            };
+        }
+
+        // Função melhorada que entende se a célula tem o nome todo (ex: "C 2S BMT CÍNTIA") ou só a letra
+        function verificaTurno(linha, indices, codigoDesejado) {
+            for (let i = 0; i < indices.length; i++) {
+                let idx = indices[i];
+                if (linha.length > idx && linha[idx]) {
+                    let valor = linha[idx].toString().toUpperCase().trim();
+                    // Checa se é exatamente a letra, ou se a letra vem seguida de um espaço ou quebra de linha
+                    if (valor === codigoDesejado || 
+                        valor.startsWith(codigoDesejado + " ") || 
+                        valor.startsWith(codigoDesejado + "\n") || 
+                        valor.startsWith(codigoDesejado + "-")) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        async function processarUnicaAba(codigoOperador, tituloAba, mesEscala, anoEscala) {
+            try {
+                const primeiroDia = new Date(anoEscala, parseInt(mesEscala) - 1, 1).toISOString();
+                const ultimoDia = new Date(anoEscala, parseInt(mesEscala), 1).toISOString();
+
+                const responseCal = await gapi.client.calendar.events.list({
+                    'calendarId': 'primary',
+                    'timeMin': primeiroDia,
+                    'timeMax': ultimoDia,
+                    'maxResults': 2500
+                });
+
+                let mapaExistentes = {};
+                
+                // Filtra todos os eventos gerados pelo App no período
+                const eventosApp = (responseCal.result.items || []).filter(ev => 
+                    ev.description && ev.description.includes('Gerado automaticamente via Web App')
+                );
+
+                eventosApp.forEach(ev => {
+                    // 1. Tenta achar pelo Carimbo Invisível (appKey)
+                    if (ev.extendedProperties && ev.extendedProperties.private && ev.extendedProperties.private.appKey) {
+                        const appKey = ev.extendedProperties.private.appKey;
+                        // Só adiciona no mapa se a chave pertencer a ABA atual
+                        if (appKey.startsWith(`${tituloAba}_`)) {
+                            mapaExistentes[appKey] = ev;
+                        }
+                    } 
+                    // 2. Se for um evento velho sem carimbo, identifica pela descrição e força exclusão
+                    else if (ev.description.includes(`(${tituloAba})`)) {
+                        mapaExistentes[`OLD_${ev.id}`] = ev; 
+                    }
+                });
+
+                const rangeDinamico = `'${tituloAba}'!A10:K45`;
+                const responseSheets = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: SPREADSHEET_ID,
+                    range: rangeDinamico,
+                });
+                
+                const linhas = responseSheets.result.values;
+                if (!linhas || linhas.length === 0) return { inseridos: 0, removidos: 0, mantidos: 0 };
+
+                let turnosDesejados = [];
+                const isCMM = tituloAba.toUpperCase().includes('CMM');
+
+                for (let i = 0; i < linhas.length; i++) {
+                    const linha = linhas[i];
+                    if (!linha || !linha[0]) continue; 
+
+                    const diaStr = linha[0].toString().trim();
+                    const dia = parseInt(diaStr);
+                    if (isNaN(dia) || dia < 1 || dia > 31) continue; 
+
+                    const dataBaseStr = `${anoEscala}-${mesEscala}-${String(dia).padStart(2, '0')}`;
+
+                    // --- 1º Turno (Colunas C, D, E) [índices 2, 3, 4] -> IGUAL PARA EMS E CMM ---
+                    if (verificaTurno(linha, [2, 3, 4], codigoOperador)) {
+                        turnosDesejados.push(criarObjetoEvento("1º TURNO", dataBaseStr, anoEscala, mesEscala, dia, tituloAba));
+                    }
+
+                    if (isCMM) {
+                        // --- 2º Turno CMM (Colunas F, G, H) [índices 5, 6, 7] ---
+                        if (verificaTurno(linha, [5, 6, 7], codigoOperador)) {
+                            turnosDesejados.push(criarObjetoEvento("2º TURNO", dataBaseStr, anoEscala, mesEscala, dia, tituloAba));
+                        }
+                        // --- 3º Turno CMM (Colunas I, J, K) [índices 8, 9, 10] ---
+                        if (verificaTurno(linha, [8, 9, 10], codigoOperador)) {
+                            turnosDesejados.push(criarObjetoEvento("3º TURNO", dataBaseStr, anoEscala, mesEscala, dia, tituloAba));
+                        }
+                    } else {
+                        // --- 2º Turno EMS (Colunas F, G) [índices 5, 6] ---
+                        if (verificaTurno(linha, [5, 6], codigoOperador)) {
+                            turnosDesejados.push(criarObjetoEvento("2º TURNO", dataBaseStr, anoEscala, mesEscala, dia, tituloAba));
+                        }
+                    }
+                }
+
+                let inseridos = 0;
+                let removidos = 0;
+                let mantidos = 0;
+
+                const chavesDesejadas = turnosDesejados.map(t => t.chave);
+
+                for (const chaveExistente in mapaExistentes) {
+                    if (!chavesDesejadas.includes(chaveExistente)) {
+                        await gapi.client.calendar.events.delete({
+                            'calendarId': 'primary',
+                            'eventId': mapaExistentes[chaveExistente].id
+                        });
+                        removidos++;
+                    }
+                }
+
+                for (const turno of turnosDesejados) {
+                    if (!mapaExistentes[turno.chave]) {
+                        await gapi.client.calendar.events.insert({
+                            'calendarId': 'primary', 
+                            'resource': turno.corpo
+                        });
+                        inseridos++;
+                    } else {
+                        mantidos++; 
+                    }
+                }
+
+                return { inseridos, removidos, mantidos };
+
+            } catch (err) {
+                console.error(`Erro na aba ${tituloAba}:`, err);
+                return null; 
+            }
+        }
+    </script>
+</body>
+</html>
