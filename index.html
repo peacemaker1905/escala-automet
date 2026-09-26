@@ -78,7 +78,6 @@
                 scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/spreadsheets.readonly',
                 callback: (tokenResponse) => {
                     if (tokenResponse && tokenResponse.access_token) {
-                        // CONSERTO AQUI: Passamos o token recebido para o GAPI
                         gapi.client.setToken({ access_token: tokenResponse.access_token });
                         
                         document.getElementById('authBtn').style.display = 'none';
@@ -215,34 +214,14 @@
                         'appKey': chaveUnica 
                     }
                 },
-                // --- CÓDIGO ADICIONADO AQUI PARA OS AVISOS ---
                 'reminders': {
-                    'useDefault': false, // Desativa o aviso padrão do usuário para usar os personalizados abaixo
+                    'useDefault': false,
                     'overrides': [
-                        { 'method': 'popup', 'minutes': 300 }, // Aviso 5 horas antes (300 minutos)
-                        { 'method': 'popup', 'minutes': 30 }   // Aviso 30 minutos antes
+                        { 'method': 'popup', 'minutes': 300 },
+                        { 'method': 'popup', 'minutes': 30 }
                     ]
                 }
-                // ---------------------------------------------
             };
-
-            evento.start = { 'dateTime': `${dataBaseStr}T${tInfo.inicio}-03:00`, 'timeZone': 'America/Sao_Paulo' };
-            
-            let dataFimStr = dataBaseStr;
-            if (tInfo.pernoite) { 
-                let nextDate = new Date(anoEscala, parseInt(mesEscala)-1, dia + 1);
-                const y = nextDate.getFullYear();
-                const m = String(nextDate.getMonth() + 1).padStart(2, '0');
-                const d = String(nextDate.getDate()).padStart(2, '0');
-                dataFimStr = `${y}-${m}-${d}`;
-            }
-            evento.end = { 'dateTime': `${dataFimStr}T${tInfo.fim}-03:00`, 'timeZone': 'America/Sao_Paulo' };
-
-            return {
-                chave: chaveUnica, 
-                corpo: evento
-            };
-        }
 
             evento.start = { 'dateTime': `${dataBaseStr}T${tInfo.inicio}-03:00`, 'timeZone': 'America/Sao_Paulo' };
             
