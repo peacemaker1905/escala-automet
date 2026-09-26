@@ -235,7 +235,7 @@
 
             // Se for pernoite, finalizamos o evento visual às 23:59 do mesmo dia
             if (tInfo.pernoite) { 
-                horaFimStr = "23:59:00";
+                horaFimStr = "23:00:00";
             }
 
             evento.end = { 'dateTime': `${dataFimStr}T${horaFimStr}-03:00`, 'timeZone': 'America/Sao_Paulo' };
