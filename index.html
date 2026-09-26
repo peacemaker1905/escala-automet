@@ -79,7 +79,6 @@
                 callback: (tokenResponse) => {
                     if (tokenResponse && tokenResponse.access_token) {
                         gapi.client.setToken({ access_token: tokenResponse.access_token });
-                        
                         document.getElementById('authBtn').style.display = 'none';
                         buscarAbasDaPlanilha(); 
                     }
@@ -87,7 +86,13 @@
             });
         }
 
-        function handleAuthClick() { tokenClient.requestAccessToken({prompt: 'consent'}); }
+        function handleAuthClick() { 
+            if (tokenClient) {
+                tokenClient.requestAccessToken({prompt: 'consent'}); 
+            } else {
+                alert("O sistema ainda está carregando. Tente novamente em alguns segundos.");
+            }
+        }
 
         function atualizarStatus(msg) { document.getElementById('status').innerText = msg; }
 
